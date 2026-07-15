@@ -1642,7 +1642,7 @@ show_text_menu() {
     sorted_keys=$(echo "${!CIS_CATEGORIES[@]}" | tr ' ' '\n' | sort)
 
     # Kategorien anzeigen
-    local categories=("L1" "L1L2")
+    local categories=("L1" "L1+L2")
     local category_names=("CIS Level 1 (alle Grundhärtungs-Massnahmen)" "CIS Level 1 + 2 (alle Massnahmen)")
     for key in ${sorted_keys}; do
         IFS='|' read -r id title level desc <<< "${CIS_CATEGORIES[$key]}"
@@ -1776,7 +1776,7 @@ show_tui() {
     # Spezial-Option: L1 (alle CIS Level 1)
     menu_items+=("L1" "CIS Level 1 (alle Grundhärtungs-Massnahmen)" "OFF")
     # Spezial-Option: L1+L2 (alle Massnahmen)
-    menu_items+=("L1L2" "CIS Level 1 + 2 (alle Massnahmen)" "OFF")
+    menu_items+=("L1+L2" "CIS Level 1 + 2 (alle Massnahmen)" "OFF")
 
     # Einzelne Kategorien hinzufügen
     local sorted_keys
@@ -1793,7 +1793,7 @@ show_tui() {
     selection=$(whiptail --title "CIS-Härtung für Debian 13 (Trixie)" \
             --backtitle "cis-hardening.sh - Automatisierte Systemhärtung" \
             --checklist \
-            "Zu härtende Bereiche auswählen:\n\n(CIS Level 1 = Grundhärtung, Level 2 = Erweiterte Härtung)\nMit LEERTASTE auswählen, mit TAB zum Bestätigen wechseln." \
+            "Zu härtende Bereiche auswählen:\n\n(CIS Level 1 = Grundhärtung, Level 2 = Erweiterte Härtung)\nMit LEERTASTE auswählen, mit TAB zum Bestätigen wechseln.\n                                              ##########" \
             55 120 30 \
             "${menu_items[@]}" \
             3>&1 1>&2 2>&3)
@@ -1818,7 +1818,7 @@ show_tui() {
     fi
 
     # Spezial-Optionen expandieren: "L1" → alle Kategorien mit Level 1
-    # "L1L2" → alle Kategorien
+    # "L1+L2" → alle Kategorien
     local selected_categories=()
     local has_l1=false
     local has_l1l2=false
@@ -1828,7 +1828,7 @@ show_tui() {
             "L1")
                 has_l1=true
                 ;;
-            "L1L2")
+            "L1+L2")
                 has_l1l2=true
                 ;;
             *)
@@ -1837,7 +1837,7 @@ show_tui() {
         esac
     done
 
-    # Wenn L1L2 gewählt, alle Kategorien übernehmen
+    # Wenn L1+L2 gewählt, alle Kategorien übernehmen
     if [ "${has_l1l2}" = true ]; then
         selected_categories=()
         for key in $(echo "${!CIS_CATEGORIES[@]}" | tr ' ' '\n' | sort); do
