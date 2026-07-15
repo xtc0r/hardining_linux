@@ -1,0 +1,1360 @@
+# ==============================================================================
+# WAZUH SCA POLICY: CIS Benchmark for Debian Linux 13 (Trixie)
+# ==============================================================================
+# DATEI:        cis_debian_13.yml
+# BESCHREIBUNG: Security Configuration Assessment Policy für Debian 13
+#               nach CIS Benchmark for Debian Linux (Level 1 + Level 2).
+# INTEGRATION:  Diese Policy wird von Wazuh SCA genutzt, um den Härtungs-
+#               status der Maschine zu bewerten und einen Health-Score zu
+#               ermitteln. Das zugehörige Remediation-Script ist:
+#               cis-hardening.sh
+#
+# INSTALLATION:
+#   1. Datei nach /var/ossec/etc/shared/default/cis_debian_13.yml kopieren
+#   2. Wazuh-Agent neu starten: systemctl restart wazuh-agent
+#   3. Im Wazuh-Dashboard: Configuration Assessment -> CIS Debian 13 Policy
+# ==============================================================================
+
+policy:
+  id: "cis_debian_13"
+  file: "cis_debian_13.yml"
+  name: "CIS Benchmark for Debian Linux 13"
+  description: >
+    Security Configuration Assessment Policy for Debian 13 (Trixie) based on
+    the CIS Benchmark for Debian Linux, covering Level 1 (basic hardening)
+    and Level 2 (advanced hardening) recommendations.
+  references:
+    - title: "CIS Debian Linux Benchmark"
+      url: "https://www.cisecurity.org/benchmark/debian_linux/"
+    - title: "CIS Controls"
+      url: "https://www.cisecurity.org/controls/"
+  compliance:
+    - cis: ["1.1", "1.2", "1.4", "1.5", "1.6", "2.1", "2.2", "3.1", "3.2", "3.3", "3.4", "3.5", "4.1", "4.2", "5.2", "5.3", "5.4", "5.5", "6.1", "6.2"]
+
+requirements:
+  - title: "Package requirements for CIS Debian 13 hardening"
+    description: "Required packages for security auditing and monitoring"
+    condition: "all"
+    rules:
+      - type: "package"
+        field: "package"
+        value: "auditd"
+      - type: "package"
+        field: "package"
+        value: "rsyslog"
+
+variables:
+  $PROHIBITED_FILESYSTEMS: "cramfs freevxfs jffs2 hfs hfsplus squashfs udf"
+
+# ==============================================================================
+# 1. FILESYSTEM CONFIGURATION (CIS 1.1)
+# ==============================================================================
+checks:
+  - id: 10100
+    title: "CIS 1.1.2 - Ensure /tmp is configured with nodev option"
+    description: "The /tmp directory should be mounted with nodev to prevent execution of device files."
+    remediation: "Edit /etc/fstab and add nodev,nosuid,noexec to the /tmp mount options."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "mount | grep -E '\\s/tmp\\s'"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: ".*nodev.*"
+    compliance:
+      - cis: ["1.1.2"]
+        level: "level_1"
+
+  - id: 10101
+    title: "CIS 1.1.4 - Ensure /dev/shm is configured with nodev option"
+    description: "The /dev/shm filesystem should be mounted with nodev,nosuid,noexec."
+    remediation: "Edit /etc/fstab and add 'tmpfs /dev/shm tmpfs defaults,nodev,nosuid,noexec 0 0'."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "mount | grep -E '\\s/dev/shm\\s'"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: ".*nodev.*noexec.*nosuid.*"
+    compliance:
+      - cis: ["1.1.4"]
+        level: "level_1"
+
+  - id: 10102
+    title: "CIS 1.1.21 - Ensure sticky bit is set on all world-writable directories"
+    description: "World-writable directories should have the sticky bit set to prevent unauthorized file deletion."
+    remediation: "Run 'df --local -P | awk '{if(NR>1) print $6}' | xargs -I '{}' find '{}' -xdev -type d \\( -perm -0002 -a ! -perm -1000 \\) -exec chmod +t {} +'"
+    condition: "none"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "df --local -P | awk '{if(NR>1) print $6}' | xargs -I '{}' find '{}' -xdev -type d \\( -perm -0002 -a ! -perm -1000 \\) -print 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "."
+    compliance:
+      - cis: ["1.1.21"]
+        level: "level_1"
+
+  - id: 10103
+    title: "CIS 1.1.22 - Disable Automounting"
+    description: "Automounting of removable media should be disabled."
+    remediation: "Run 'systemctl disable autofs'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "systemctl is-enabled autofs 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "disabled|masked|not-found"
+    compliance:
+      - cis: ["1.1.22"]
+        level: "level_1"
+
+  - id: 10104
+    title: "CIS 1.1.23 - Disable USB Storage (L2)"
+    description: "USB storage should be disabled to prevent data exfiltration."
+    remediation: "Run 'echo \"install usb-storage /bin/true\" > /etc/modprobe.d/usb-storage.conf'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -r 'install usb-storage' /etc/modprobe.d/ 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "install usb-storage /bin/true"
+    compliance:
+      - cis: ["1.1.23"]
+        level: "level_2"
+
+# ==============================================================================
+# 2. SOFTWARE UPDATES (CIS 1.2)
+# ==============================================================================
+  - id: 10200
+    title: "CIS 1.2.1 - Ensure package manager repositories are configured"
+    description: "Package repositories should be configured with GPG signature verification."
+    remediation: "Ensure all sources.list entries use signed-by or are official Debian mirrors."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -r '^deb ' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null | head -5"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "deb "
+    compliance:
+      - cis: ["1.2.1"]
+        level: "level_1"
+
+  - id: 10201
+    title: "CIS 1.2.2 - Ensure GPG keys are configured"
+    description: "GPG keys for package repositories should be configured."
+    remediation: "Import GPG keys for repositories using apt-key or keyrings."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "apt-key list 2>/dev/null || find /etc/apt/keyrings -type f -name '*.asc' -o -name '*.gpg' 2>/dev/null | head -5"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "."
+    compliance:
+      - cis: ["1.2.2"]
+        level: "level_1"
+
+  - id: 10202
+    title: "CIS 1.2.3 - Ensure unattended-upgrades is configured"
+    description: "Automatic security updates should be configured."
+    remediation: "Run 'apt-get install -y unattended-upgrades && dpkg-reconfigure -plow unattended-upgrades'"
+    condition: "any"
+    rules:
+      - type: "package"
+        field: "package"
+        value: "unattended-upgrades"
+    compliance:
+      - cis: ["1.2.3"]
+        level: "level_1"
+
+# ==============================================================================
+# 3. BOOTLOADER (CIS 1.4, 1.5)
+# ==============================================================================
+  - id: 10400
+    title: "CIS 1.4.1 - Ensure permissions on bootloader config are configured"
+    description: "Bootloader configuration should be readable only by root."
+    remediation: "Run 'chmod 400 /boot/grub/grub.cfg' and 'chown root:root /boot/grub/grub.cfg'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "stat -c '%a %U:%G' /boot/grub/grub.cfg 2>/dev/null || stat -c '%a %U:%G' /boot/efi/EFI/debian/grub.cfg 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^[0-7]00 root:root$"
+    compliance:
+      - cis: ["1.4.1"]
+        level: "level_1"
+
+  - id: 10500
+    title: "CIS 1.5.1 - Ensure core dumps are restricted"
+    description: "Core dumps should be restricted to prevent information disclosure."
+    remediation: "Add '* hard core 0' to /etc/security/limits.conf"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -E '^\\*\\s+hard\\s+core\\s+0' /etc/security/limits.conf 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "\\* hard core 0"
+    compliance:
+      - cis: ["1.5.1"]
+        level: "level_1"
+
+  - id: 10501
+    title: "CIS 1.5.2 - Ensure ASLR is enabled"
+    description: "Address Space Layout Randomization should be enabled."
+    remediation: "Run 'sysctl -w kernel.randomize_va_space=2' and add to /etc/sysctl.d/"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sysctl kernel.randomize_va_space 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "kernel.randomize_va_space = 2"
+    compliance:
+      - cis: ["1.5.2"]
+        level: "level_1"
+
+# ==============================================================================
+# 4. NETWORK PARAMETERS (CIS 3.1, 3.2, 3.3)
+# ==============================================================================
+  - id: 30100
+    title: "CIS 3.1.1 - Ensure IP forwarding is disabled"
+    description: "IP forwarding should be disabled unless the system is a router."
+    remediation: "Run 'sysctl -w net.ipv4.ip_forward=0' and add to /etc/sysctl.d/"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sysctl net.ipv4.ip_forward 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "net.ipv4.ip_forward = 0$"
+    compliance:
+      - cis: ["3.1.1"]
+        level: "level_1"
+
+  - id: 30101
+    title: "CIS 3.1.2 - Ensure packet redirect sending is disabled"
+    description: "ICMP redirects should not be sent."
+    remediation: "Run 'sysctl -w net.ipv4.conf.all.send_redirects=0'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sysctl net.ipv4.conf.all.send_redirects 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "net.ipv4.conf.all.send_redirects = 0$"
+    compliance:
+      - cis: ["3.1.2"]
+        level: "level_1"
+
+  - id: 30102
+    title: "CIS 3.2.1 - Ensure source routed packets are not accepted"
+    description: "Source routed packets should be rejected."
+    remediation: "Set net.ipv4.conf.all.accept_source_route=0"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sysctl net.ipv4.conf.all.accept_source_route 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "net.ipv4.conf.all.accept_source_route = 0$"
+    compliance:
+      - cis: ["3.2.1"]
+        level: "level_1"
+
+  - id: 30103
+    title: "CIS 3.2.2 - Ensure ICMP redirects are not accepted"
+    description: "ICMP redirect messages should not be accepted."
+    remediation: "Set net.ipv4.conf.all.accept_redirects=0"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sysctl net.ipv4.conf.all.accept_redirects 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "net.ipv4.conf.all.accept_redirects = 0$"
+    compliance:
+      - cis: ["3.2.2"]
+        level: "level_1"
+
+  - id: 30104
+    title: "CIS 3.3.1 - Ensure Reverse Path Filtering is enabled"
+    description: "Reverse path filtering should be enabled to prevent IP spoofing."
+    remediation: "Set net.ipv4.conf.all.rp_filter=1"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sysctl net.ipv4.conf.all.rp_filter 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "net.ipv4.conf.all.rp_filter = 1$"
+    compliance:
+      - cis: ["3.3.1"]
+        level: "level_1"
+
+  - id: 30105
+    title: "CIS 3.3.2 - Ensure TCP SYN Cookies is enabled"
+    description: "TCP SYN cookies should be enabled to prevent SYN flood attacks."
+    remediation: "Set net.ipv4.tcp_syncookies=1"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sysctl net.ipv4.tcp_syncookies 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "net.ipv4.tcp_syncookies = 1$"
+    compliance:
+      - cis: ["3.3.2"]
+        level: "level_1"
+
+  - id: 30106
+    title: "CIS 3.3.3 - Ensure IPv6 router advertisements are not accepted"
+    description: "IPv6 router advertisements should not be accepted."
+    remediation: "Set net.ipv6.conf.all.accept_ra=0"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sysctl net.ipv6.conf.all.accept_ra 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "net.ipv6.conf.all.accept_ra = 0$"
+    compliance:
+      - cis: ["3.3.3"]
+        level: "level_1"
+
+# ==============================================================================
+# 5. AUTHENTICATION (CIS 5.3, 5.4)
+# ==============================================================================
+  - id: 50300
+    title: "CIS 5.3.1 - Ensure password hashing algorithm is SHA512"
+    description: "Password hashing should use SHA512 for secure storage."
+    remediation: "Set ENCRYPT_METHOD SHA512 in /etc/login.defs"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -E '^ENCRYPT_METHOD\\s+SHA512' /etc/login.defs 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "ENCRYPT_METHOD SHA512"
+    compliance:
+      - cis: ["5.3.1"]
+        level: "level_1"
+
+  - id: 50301
+    title: "CIS 5.3.2 - Ensure password quality is enforced"
+    description: "Password quality requirements should be configured."
+    remediation: "Install libpam-pwquality and configure /etc/security/pwquality.conf"
+    condition: "any"
+    rules:
+      - type: "package"
+        field: "package"
+        value: "libpam-pwquality"
+    compliance:
+      - cis: ["5.3.2"]
+        level: "level_1"
+
+  - id: 50400
+    title: "CIS 5.4.1 - Ensure password expiration is configured"
+    description: "Password expiration should be set to 365 days or less."
+    remediation: "Set PASS_MAX_DAYS 365 in /etc/login.defs"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -E '^PASS_MAX_DAYS\\s+[0-9]+' /etc/login.defs 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^PASS_MAX_DAYS\\s+([0-9]|[1-9][0-9]|[1-2][0-9][0-9]|3[0-5][0-9]|36[0-5])$"
+    compliance:
+      - cis: ["5.4.1"]
+        level: "level_1"
+
+  - id: 50401
+    title: "CIS 5.4.2 - Ensure default user umask is 027 or more restrictive"
+    description: "Default user umask should be set to 027."
+    remediation: "Set UMASK 027 in /etc/login.defs"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -E '^UMASK\\s+027' /etc/login.defs 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "UMASK 027"
+    compliance:
+      - cis: ["5.4.2"]
+        level: "level_1"
+
+  - id: 50402
+    title: "CIS 5.4.3 - Ensure default group for root is GID 0"
+    description: "The root account should have a primary group of GID 0."
+    remediation: "Run 'usermod -g 0 root'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -E '^root:' /etc/passwd 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^root:[^:]*:[^:]*:0:"
+    compliance:
+      - cis: ["5.4.3"]
+        level: "level_1"
+
+# ==============================================================================
+# 6. SSH SERVER (CIS 5.2)
+# ==============================================================================
+  - id: 50200
+    title: "CIS 5.2.1 - Ensure SSH Protocol is set to 2"
+    description: "SSH protocol version 2 is more secure than version 1."
+    remediation: "Set 'Protocol 2' in /etc/ssh/sshd_config"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sshd -T 2>/dev/null | grep -i 'protocol' | head -1"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "protocol 2"
+    compliance:
+      - cis: ["5.2.1"]
+        level: "level_1"
+
+  - id: 50201
+    title: "CIS 5.2.2 - Ensure SSH LogLevel is set to INFO"
+    description: "SSH logging should be set to INFO level."
+    remediation: "Set 'LogLevel INFO' in /etc/ssh/sshd_config"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sshd -T 2>/dev/null | grep -i 'loglevel' | head -1"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "loglevel INFO"
+    compliance:
+      - cis: ["5.2.2"]
+        level: "level_1"
+
+  - id: 50202
+    title: "CIS 5.2.6 - Ensure SSH PermitRootLogin is disabled"
+    description: "Root login via SSH should be disabled."
+    remediation: "Set 'PermitRootLogin no' in /etc/ssh/sshd_config"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sshd -T 2>/dev/null | grep -i 'permitrootlogin' | head -1"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "permitrootlogin no"
+    compliance:
+      - cis: ["5.2.6"]
+        level: "level_1"
+
+  - id: 50203
+    title: "CIS 5.2.7 - Ensure SSH MaxAuthTries is set to 4 or less"
+    description: "Maximum authentication attempts should be limited."
+    remediation: "Set 'MaxAuthTries 4' in /etc/ssh/sshd_config"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sshd -T 2>/dev/null | grep -i 'maxauthtries' | head -1"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "maxauthtries [0-4]$"
+    compliance:
+      - cis: ["5.2.7"]
+        level: "level_1"
+
+  - id: 50204
+    title: "CIS 5.2.9 - Ensure SSH X11 Forwarding is disabled"
+    description: "X11 forwarding should be disabled for security."
+    remediation: "Set 'X11Forwarding no' in /etc/ssh/sshd_config"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sshd -T 2>/dev/null | grep -i 'x11forwarding' | head -1"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "x11forwarding no"
+    compliance:
+      - cis: ["5.2.9"]
+        level: "level_1"
+
+  - id: 50205
+    title: "CIS 5.2.10 - Ensure SSH MaxSessions is limited"
+    description: "Maximum concurrent SSH sessions should be limited."
+    remediation: "Set 'MaxSessions 10' in /etc/ssh/sshd_config"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sshd -T 2>/dev/null | grep -i 'maxsessions' | head -1"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "maxsessions (1[0-5]|[1-9])$"
+    compliance:
+      - cis: ["5.2.10"]
+        level: "level_1"
+
+  - id: 50206
+    title: "CIS 5.2.11 - Ensure SSH Idle Timeout Interval is configured"
+    description: "SSH idle timeout should be configured to disconnect inactive sessions."
+    remediation: "Set 'ClientAliveInterval 300' and 'ClientAliveCountMax 0' in /etc/ssh/sshd_config"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sshd -T 2>/dev/null | grep -i 'clientaliveinterval' | head -1"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "clientaliveinterval (3[0-9][0-9]|[12][0-9][0-9]|[1-9][0-9]?)$"
+    compliance:
+      - cis: ["5.2.11"]
+        level: "level_1"
+
+  - id: 50207
+    title: "CIS 5.2.12 - Ensure SSH LoginGraceTime is set to one minute or less"
+    description: "SSH login grace time should be limited."
+    remediation: "Set 'LoginGraceTime 60' in /etc/ssh/sshd_config"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "sshd -T 2>/dev/null | grep -i 'logingracetime' | head -1"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "logingracetime (60|[1-5]?[0-9])$"
+    compliance:
+      - cis: ["5.2.12"]
+        level: "level_1"
+
+# ==============================================================================
+# 7. AUDIT DAEMON (CIS 4.1)
+# ==============================================================================
+  - id: 40100
+    title: "CIS 4.1.1.1 - Ensure auditd is installed"
+    description: "The audit daemon should be installed for system auditing."
+    remediation: "Run 'apt-get install -y auditd'"
+    condition: "any"
+    rules:
+      - type: "package"
+        field: "package"
+        value: "auditd"
+    compliance:
+      - cis: ["4.1.1.1"]
+        level: "level_1"
+
+  - id: 40101
+    title: "CIS 4.1.1.2 - Ensure auditd service is enabled"
+    description: "The auditd service should be enabled and running."
+    remediation: "Run 'systemctl enable --now auditd'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "systemctl is-enabled auditd 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "enabled"
+    compliance:
+      - cis: ["4.1.1.2"]
+        level: "level_1"
+
+  - id: 40102
+    title: "CIS 4.1.2.1 - Ensure audit log storage size is configured"
+    description: "Audit log maximum size should be configured."
+    remediation: "Set 'max_log_file = 100' in /etc/audit/auditd.conf"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -E '^max_log_file\\s+=\\s+[0-9]+' /etc/audit/auditd.conf 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "max_log_file\\s+=\\s+[0-9]+"
+    compliance:
+      - cis: ["4.1.2.1"]
+        level: "level_1"
+
+  - id: 40103
+    title: "CIS 4.1.2.2 - Ensure audit logs are not automatically deleted"
+    description: "Audit logs should be rotated, not deleted."
+    remediation: "Set 'max_log_file_action = ROTATE' in /etc/audit/auditd.conf"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -E '^max_log_file_action\\s+=\\s+ROTATE' /etc/audit/auditd.conf 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "max_log_file_action"
+    compliance:
+      - cis: ["4.1.2.2"]
+        level: "level_1"
+
+# ==============================================================================
+# 8. LOGGING (CIS 4.2)
+# ==============================================================================
+  - id: 40200
+    title: "CIS 4.2.1.1 - Ensure rsyslog is installed"
+    description: "rsyslog should be installed for system logging."
+    remediation: "Run 'apt-get install -y rsyslog'"
+    condition: "any"
+    rules:
+      - type: "package"
+        field: "package"
+        value: "rsyslog"
+    compliance:
+      - cis: ["4.2.1.1"]
+        level: "level_1"
+
+  - id: 40201
+    title: "CIS 4.2.1.2 - Ensure rsyslog service is enabled"
+    description: "The rsyslog service should be enabled and running."
+    remediation: "Run 'systemctl enable --now rsyslog'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "systemctl is-enabled rsyslog 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "enabled"
+    compliance:
+      - cis: ["4.2.1.2"]
+        level: "level_1"
+
+  - id: 40202
+    title: "CIS 4.2.1.3 - Ensure rsyslog log file creation mode is configured"
+    description: "Log file permissions should be restricted."
+    remediation: "Set '$FileCreateMode 0640' in /etc/rsyslog.conf"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -E '^\\$FileCreateMode\\s+0[0-9]+' /etc/rsyslog.conf /etc/rsyslog.d/*.conf 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "FileCreateMode 0640"
+    compliance:
+      - cis: ["4.2.1.3"]
+        level: "level_1"
+
+  - id: 40203
+    title: "CIS 4.2.2.1 - Ensure journald is configured to send logs to rsyslog"
+    description: "journald should forward logs to rsyslog."
+    remediation: "Set 'ForwardToSyslog=yes' in /etc/systemd/journald.conf"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -E '^ForwardToSyslog=yes' /etc/systemd/journald.conf 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "ForwardToSyslog=yes"
+    compliance:
+      - cis: ["4.2.2.1"]
+        level: "level_1"
+
+# ==============================================================================
+# 9. FIREWALL (CIS 3.5)
+# ==============================================================================
+  - id: 30500
+    title: "CIS 3.5.1.1 - Ensure nftables is installed"
+    description: "nftables should be installed for firewall functionality."
+    remediation: "Run 'apt-get install -y nftables'"
+    condition: "any"
+    rules:
+      - type: "package"
+        field: "package"
+        value: "nftables"
+    compliance:
+      - cis: ["3.5.1.1"]
+        level: "level_1"
+
+  - id: 30501
+    title: "CIS 3.5.1.2 - Ensure nftables service is enabled"
+    description: "The nftables service should be enabled."
+    remediation: "Run 'systemctl enable --now nftables'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "systemctl is-enabled nftables 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "enabled"
+    compliance:
+      - cis: ["3.5.1.2"]
+        level: "level_1"
+
+  - id: 30502
+    title: "CIS 3.5.1.3 - Ensure nftables default deny policy is configured"
+    description: "Default deny policy should be configured for input chain."
+    remediation: "Configure nftables with 'policy drop' on the input chain."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "nft list ruleset 2>/dev/null | grep -A5 'hook input' | grep 'policy drop'"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "policy drop"
+    compliance:
+      - cis: ["3.5.1.3"]
+        level: "level_1"
+
+  - id: 30503
+    title: "CIS 3.5.1.4 - Ensure loopback traffic is configured"
+    description: "Loopback interface traffic should be allowed."
+    remediation: "Add 'iif lo accept' to the input chain."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "nft list ruleset 2>/dev/null | grep 'iif lo accept'"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "iif.*lo.*accept"
+    compliance:
+      - cis: ["3.5.1.4"]
+        level: "level_1"
+
+# ==============================================================================
+# 10. SERVICES (CIS 2.1, 2.2)
+# ==============================================================================
+  - id: 20100
+    title: "CIS 2.1.1 - Ensure xinetd is not installed"
+    description: "xinetd should not be installed."
+    remediation: "Run 'apt-get remove -y xinetd'"
+    condition: "none"
+    rules:
+      - type: "package"
+        field: "package"
+        value: "xinetd"
+    compliance:
+      - cis: ["2.1.1"]
+        level: "level_1"
+
+  - id: 20200
+    title: "CIS 2.2.2 - Ensure Avahi Daemon is not installed"
+    description: "Avahi daemon should not be installed."
+    remediation: "Run 'apt-get remove -y avahi-daemon'"
+    condition: "none"
+    rules:
+      - type: "package"
+        field: "package"
+        value: "avahi-daemon"
+    compliance:
+      - cis: ["2.2.2"]
+        level: "level_1"
+
+  - id: 20201
+    title: "CIS 2.2.3 - Ensure CUPS is not installed"
+    description: "CUPS printing service should not be installed."
+    remediation: "Run 'apt-get remove -y cups'"
+    condition: "none"
+    rules:
+      - type: "package"
+        field: "package"
+        value: "cups"
+    compliance:
+      - cis: ["2.2.3"]
+        level: "level_1"
+
+  - id: 20202
+    title: "CIS 2.2.4 - Ensure DHCP Server is not installed"
+    description: "DHCP server should not be installed."
+    remediation: "Run 'apt-get remove -y isc-dhcp-server'"
+    condition: "none"
+    rules:
+      - type: "package"
+        field: "package"
+        value: "isc-dhcp-server"
+    compliance:
+      - cis: ["2.2.4"]
+        level: "level_1"
+
+  - id: 20203
+    title: "CIS 2.2.5 - Ensure DNS Server is not installed"
+    description: "DNS server should not be installed."
+    remediation: "Run 'apt-get remove -y bind9'"
+    condition: "none"
+    rules:
+      - type: "package"
+        field: "package"
+        value: "bind9"
+    compliance:
+      - cis: ["2.2.5"]
+        level: "level_1"
+
+  - id: 20204
+    title: "CIS 2.2.17 - Ensure NIS Client is not installed"
+    description: "NIS client should not be installed."
+    remediation: "Run 'apt-get remove -y nis'"
+    condition: "none"
+    rules:
+      - type: "package"
+        field: "package"
+        value: "nis"
+    compliance:
+      - cis: ["2.2.17"]
+        level: "level_1"
+
+  - id: 20205
+    title: "CIS 2.2.19 - Ensure rsync service is not enabled"
+    description: "rsync daemon should not be enabled."
+    remediation: "Run 'systemctl disable --now rsync'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "systemctl is-enabled rsync 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "disabled|masked|not-found"
+    compliance:
+      - cis: ["2.2.19"]
+        level: "level_1"
+
+  - id: 20206
+    title: "CIS 2.2.20 - Ensure NIS Server is not installed"
+    description: "NIS server should not be installed."
+    remediation: "Run 'apt-get remove -y nis'"
+    condition: "none"
+    rules:
+      - type: "package"
+        field: "package"
+        value: "nis"
+    compliance:
+      - cis: ["2.2.20"]
+        level: "level_1"
+
+# ==============================================================================
+# 11. APPARMOR (CIS 1.6, Level 2)
+# ==============================================================================
+  - id: 10600
+    title: "CIS 1.6.1 - Ensure AppArmor is installed (L2)"
+    description: "AppArmor should be installed."
+    remediation: "Run 'apt-get install -y apparmor apparmor-profiles apparmor-utils'"
+    condition: "any"
+    rules:
+      - type: "package"
+        field: "package"
+        value: "apparmor"
+    compliance:
+      - cis: ["1.6.1"]
+        level: "level_2"
+
+  - id: 10601
+    title: "CIS 1.6.2 - Ensure AppArmor is enabled in the bootloader (L2)"
+    description: "AppArmor should be enabled via kernel parameters."
+    remediation: "Add 'apparmor=1 security=apparmor' to GRUB_CMDLINE_LINUX."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -E 'apparmor=1' /proc/cmdline 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "apparmor=1"
+    compliance:
+      - cis: ["1.6.2"]
+        level: "level_2"
+
+  - id: 10602
+    title: "CIS 1.6.3 - Ensure all AppArmor Profiles are in enforce mode (L2)"
+    description: "All AppArmor profiles should be in enforce mode."
+    remediation: "Run 'aa-enforce /etc/apparmor.d/*'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "aa-status 2>/dev/null | grep 'profiles are in enforce mode'"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "[1-9][0-9]* profiles are in enforce mode"
+    compliance:
+      - cis: ["1.6.3"]
+        level: "level_2"
+
+# ==============================================================================
+# 12. KERNEL MODULES (CIS 1.1.1, Level 2)
+# ==============================================================================
+  - id: 10110
+    title: "CIS 1.1.1.1 - Ensure cramfs is disabled (L2)"
+    description: "The cramfs filesystem should be disabled."
+    remediation: "Run 'echo \"install cramfs /bin/true\" > /etc/modprobe.d/cramfs.conf'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -r 'install cramfs' /etc/modprobe.d/ 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "install cramfs /bin/true"
+    compliance:
+      - cis: ["1.1.1.1"]
+        level: "level_2"
+
+  - id: 10111
+    title: "CIS 1.1.1.2 - Ensure freevxfs is disabled (L2)"
+    description: "The freevxfs filesystem should be disabled."
+    remediation: "Run 'echo \"install freevxfs /bin/true\" > /etc/modprobe.d/freevxfs.conf'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -r 'install freevxfs' /etc/modprobe.d/ 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "install freevxfs /bin/true"
+    compliance:
+      - cis: ["1.1.1.2"]
+        level: "level_2"
+
+  - id: 10112
+    title: "CIS 1.1.1.3 - Ensure jffs2 is disabled (L2)"
+    description: "The jffs2 filesystem should be disabled."
+    remediation: "Run 'echo \"install jffs2 /bin/true\" > /etc/modprobe.d/jffs2.conf'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -r 'install jffs2' /etc/modprobe.d/ 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "install jffs2 /bin/true"
+    compliance:
+      - cis: ["1.1.1.3"]
+        level: "level_2"
+
+  - id: 10113
+    title: "CIS 1.1.1.4 - Ensure hfs is disabled (L2)"
+    description: "The hfs filesystem should be disabled."
+    remediation: "Run 'echo \"install hfs /bin/true\" > /etc/modprobe.d/hfs.conf'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -r 'install hfs' /etc/modprobe.d/ 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "install hfs /bin/true"
+    compliance:
+      - cis: ["1.1.1.4"]
+        level: "level_2"
+
+  - id: 10114
+    title: "CIS 1.1.1.5 - Ensure hfsplus is disabled (L2)"
+    description: "The hfsplus filesystem should be disabled."
+    remediation: "Run 'echo \"install hfsplus /bin/true\" > /etc/modprobe.d/hfsplus.conf'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -r 'install hfsplus' /etc/modprobe.d/ 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "install hfsplus /bin/true"
+    compliance:
+      - cis: ["1.1.1.5"]
+        level: "level_2"
+
+  - id: 10115
+    title: "CIS 1.1.1.6 - Ensure squashfs is disabled (L2)"
+    description: "The squashfs filesystem should be disabled."
+    remediation: "Run 'echo \"install squashfs /bin/true\" > /etc/modprobe.d/squashfs.conf'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -r 'install squashfs' /etc/modprobe.d/ 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "install squashfs /bin/true"
+    compliance:
+      - cis: ["1.1.1.6"]
+        level: "level_2"
+
+  - id: 10116
+    title: "CIS 1.1.1.7 - Ensure udf is disabled (L2)"
+    description: "The udf filesystem should be disabled."
+    remediation: "Run 'echo \"install udf /bin/true\" > /etc/modprobe.d/udf.conf'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "grep -r 'install udf' /etc/modprobe.d/ 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "install udf /bin/true"
+    compliance:
+      - cis: ["1.1.1.7"]
+        level: "level_2"
+
+# ==============================================================================
+# 13. SYSTEM MAINTENANCE (CIS 6.1)
+# ==============================================================================
+  - id: 60100
+    title: "CIS 6.1.2 - Ensure permissions on /etc/passwd are configured"
+    description: "/etc/passwd should have 644 permissions."
+    remediation: "Run 'chmod 644 /etc/passwd'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "stat -c '%a' /etc/passwd 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^644$"
+    compliance:
+      - cis: ["6.1.2"]
+        level: "level_1"
+
+  - id: 60101
+    title: "CIS 6.1.3 - Ensure permissions on /etc/shadow are configured"
+    description: "/etc/shadow should have 640 permissions."
+    remediation: "Run 'chmod 640 /etc/shadow'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "stat -c '%a' /etc/shadow 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^[0-6][0-4]0$"
+    compliance:
+      - cis: ["6.1.3"]
+        level: "level_1"
+
+  - id: 60102
+    title: "CIS 6.1.4 - Ensure permissions on /etc/group are configured"
+    description: "/etc/group should have 644 permissions."
+    remediation: "Run 'chmod 644 /etc/group'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "stat -c '%a' /etc/group 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^644$"
+    compliance:
+      - cis: ["6.1.4"]
+        level: "level_1"
+
+  - id: 60103
+    title: "CIS 6.1.5 - Ensure permissions on /etc/gshadow are configured"
+    description: "/etc/gshadow should have 640 permissions."
+    remediation: "Run 'chmod 640 /etc/gshadow'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "stat -c '%a' /etc/gshadow 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^[0-6][0-4]0$"
+    compliance:
+      - cis: ["6.1.5"]
+        level: "level_1"
+
+  - id: 60104
+    title: "CIS 6.2.1 - Ensure no duplicate UIDs exist"
+    description: "No duplicate user IDs should exist."
+    remediation: "Edit /etc/passwd to ensure all UIDs are unique."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "cut -f3 -d: /etc/passwd | sort | uniq -d 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^$"
+    compliance:
+      - cis: ["6.2.1"]
+        level: "level_1"
+
+  - id: 60105
+    title: "CIS 6.2.2 - Ensure no duplicate GIDs exist"
+    description: "No duplicate group IDs should exist."
+    remediation: "Edit /etc/group to ensure all GIDs are unique."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "cut -f3 -d: /etc/group | sort | uniq -d 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^$"
+    compliance:
+      - cis: ["6.2.2"]
+        level: "level_1"
+
+  - id: 60106
+    title: "CIS 6.2.3 - Ensure no duplicate user names exist"
+    description: "No duplicate user names should exist."
+    remediation: "Edit /etc/passwd to ensure all usernames are unique."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "cut -f1 -d: /etc/passwd | sort | uniq -d 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^$"
+    compliance:
+      - cis: ["6.2.3"]
+        level: "level_1"
+
+  - id: 60107
+    title: "CIS 6.2.4 - Ensure no duplicate group names exist"
+    description: "No duplicate group names should exist."
+    remediation: "Edit /etc/group to ensure all group names are unique."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "cut -f1 -d: /etc/group | sort | uniq -d 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^$"
+    compliance:
+      - cis: ["6.2.4"]
+        level: "level_1"
+
+  - id: 60108
+    title: "CIS 6.2.5 - Ensure root PATH Integrity"
+    description: "The root PATH should not contain empty entries or dot entries."
+    remediation: "Edit /root/.profile to remove insecure PATH entries."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "echo \"$PATH\" | grep -E '(^|:)(\\.|:)' 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^$"
+    compliance:
+      - cis: ["6.2.5"]
+        level: "level_1"
+
+  - id: 60109
+    title: "CIS 6.2.6 - Ensure root is the only UID 0 account"
+    description: "Only root should have UID 0."
+    remediation: "Remove or change UID of any account other than root with UID 0."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "awk -F: '($3 == 0) {print $1}' /etc/passwd 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^root$"
+    compliance:
+      - cis: ["6.2.6"]
+        level: "level_1"
+
+# ==============================================================================
+# 14. CIS LEVEL 2 ADDITIONAL CHECKS
+# ==============================================================================
+  - id: 90000
+    title: "L2 - Ensure time synchronization is in use (chrony)"
+    description: "Time synchronization should be configured."
+    remediation: "Run 'apt-get install -y chrony'"
+    condition: "any"
+    rules:
+      - type: "package"
+        field: "package"
+        value: "chrony"
+    compliance:
+      - cis: ["2.2.1.1"]
+        level: "level_2"
+
+  - id: 90001
+    title: "L2 - Ensure message of the day is configured"
+    description: "MOTD banner should be configured."
+    remediation: "Configure /etc/motd with a security warning."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "test -s /etc/motd && echo 'exists' || echo 'empty'"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "exists"
+    compliance:
+      - cis: ["1.7.1"]
+        level: "level_2"
+
+  - id: 90002
+    title: "L2 - Ensure local login warning banner is configured"
+    description: "Local login banner should be configured."
+    remediation: "Configure /etc/issue with a security warning."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "test -s /etc/issue && echo 'exists' || echo 'empty'"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "exists"
+    compliance:
+      - cis: ["1.7.2"]
+        level: "level_2"
+
+  - id: 90003
+    title: "L2 - Ensure remote login warning banner is configured"
+    description: "Remote login banner should be configured."
+    remediation: "Configure /etc/issue.net with a security warning."
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "test -s /etc/issue.net && echo 'exists' || echo 'empty'"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "exists"
+    compliance:
+      - cis: ["1.7.3"]
+        level: "level_2"
+
+  - id: 90004
+    title: "L2 - Ensure permissions on /etc/motd are configured"
+    description: "MOTD file should have restricted permissions."
+    remediation: "Run 'chmod 644 /etc/motd'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "stat -c '%a' /etc/motd 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^644$"
+    compliance:
+      - cis: ["1.7.4"]
+        level: "level_2"
+
+  - id: 90005
+    title: "L2 - Ensure permissions on /etc/issue are configured"
+    description: "Local login banner file should have restricted permissions."
+    remediation: "Run 'chmod 644 /etc/issue'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "stat -c '%a' /etc/issue 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^644$"
+    compliance:
+      - cis: ["1.7.5"]
+        level: "level_2"
+
+  - id: 90006
+    title: "L2 - Ensure permissions on /etc/issue.net are configured"
+    description: "Remote login banner file should have restricted permissions."
+    remediation: "Run 'chmod 644 /etc/issue.net'"
+    condition: "any"
+    rules:
+      - type: "command"
+        field: "command"
+        value: "stat -c '%a' /etc/issue.net 2>/dev/null"
+        operator: "regex"
+        result:
+          type: "regex"
+          value: "^644$"
+    compliance:
+      - cis: ["1.7.6"]
+        level: "level_2"
