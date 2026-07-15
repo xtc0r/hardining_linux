@@ -96,22 +96,22 @@ fi
 # kann über die rsyslog-Konfiguration auf local0.* filtern.
 # Siehe README.md → Abschnitt "Syslog-Integration und zentrales Logging".
 log_info() {
-    echo -e "${COLOR_BLUE}[INFO]${COLOR_RESET} $*" | tee -a "${LOG_FILE}"
+    echo -e "${COLOR_BLUE}[INFO]${COLOR_RESET} $*" | tee -a "${LOG_FILE}" 2>/dev/null || true
     logger -t CIS-HARDENING -p local0.info "INFO: $*"
 }
 
 log_ok() {
-    echo -e "${COLOR_GREEN}[OK]${COLOR_RESET} $*" | tee -a "${LOG_FILE}"
+    echo -e "${COLOR_GREEN}[OK]${COLOR_RESET} $*" | tee -a "${LOG_FILE}" 2>/dev/null || true
     logger -t CIS-HARDENING -p local0.notice "OK: $*"
 }
 
 log_warn() {
-    echo -e "${COLOR_YELLOW}[WARN]${COLOR_RESET} $*" | tee -a "${LOG_FILE}"
+    echo -e "${COLOR_YELLOW}[WARN]${COLOR_RESET} $*" | tee -a "${LOG_FILE}" 2>/dev/null || true
     logger -t CIS-HARDENING -p local0.warning "WARN: $*"
 }
 
 log_error() {
-    echo -e "${COLOR_RED}[FEHLER]${COLOR_RESET} $*" >&2 | tee -a "${LOG_FILE}" >&2
+    echo -e "${COLOR_RED}[FEHLER]${COLOR_RESET} $*" >&2 | tee -a "${LOG_FILE}" >&2 2>/dev/null || true
     logger -t CIS-HARDENING -p local0.err "FEHLER: $*"
 }
 
@@ -121,7 +121,7 @@ log_section() {
     echo ""
     echo -e "${COLOR_BOLD}${COLOR_CYAN}${title}${COLOR_RESET}"
     echo -e "${COLOR_DIM}${separator}${COLOR_RESET}"
-    echo "" | tee -a "${LOG_FILE}"
+    echo "" | tee -a "${LOG_FILE}" 2>/dev/null || true
     logger -t CIS-HARDENING -p local0.info "SECTION: ${title}"
 }
 
@@ -129,7 +129,7 @@ log_step() {
     local step="$1"
     local total="$2"
     local message="$3"
-    echo -e "${COLOR_MAGENTA}[${step}/${total}]${COLOR_RESET} ${message}" | tee -a "${LOG_FILE}"
+    echo -e "${COLOR_MAGENTA}[${step}/${total}]${COLOR_RESET} ${message}" | tee -a "${LOG_FILE}" 2>/dev/null || true
     logger -t CIS-HARDENING -p local0.info "STEP [${step}/${total}]: ${message}"
 }
 
@@ -259,24 +259,33 @@ mask_service() {
     log_ok "Dienst ${service} (maskiert)"
 }
 
-# Prüft ob whiptail verfügbar ist (für TUI-Modus).
-# Falls whiptail nicht installiert ist, wird ein textbasierter Fallback
-# verwendet (bash-select + read). Dies verhindert stumme Fehler durch
-# fehlschlagende apt-get-Installationen.
+# Prüft ob whiptail verfügbar ist und ein interaktives Terminal vorliegt.
+# Falls whiptail fehlt oder kein TTY vorhanden ist, wird der textbasierte
+# Fallback verwendet (show_text_menu).
 check_whiptail() {
-    if command -v whiptail &>/dev/null; then
-        return 0
+    if ! command -v whiptail &>/dev/null; then
+        log_warn "whiptail nicht gefunden. Versuche Installation..."
+        if apt-get install -y whiptail >> "${LOG_FILE}" 2>&1; then
+            log_info "whiptail (installiert)"
+        else
+            log_warn "whiptail-Installation fehlgeschlagen. Verwende textbasiertes Menü."
+            log_warn "Installation mit: apt-get install -y whiptail"
+            return 1
+        fi
     fi
 
-    log_warn "whiptail nicht gefunden. Versuche Installation..."
-    if apt-get install -y whiptail >> "${LOG_FILE}" 2>&1; then
-        log_info "whiptail (installiert)"
-        return 0
+    # Prüfen ob ein interaktives Terminal vorliegt (whiptail benötigt /dev/tty)
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        log_info "Kein interaktives Terminal erkannt. Verwende textbasiertes Menü."
+        return 1
     fi
 
-    log_warn "whiptail-Installation fehlgeschlagen. Verwende textbasiertes Menü."
-    log_warn "Installation mit: apt-get install -y whiptail"
-    return 1
+    # Prüfen ob TERM auf einen unterstützten Wert gesetzt ist
+    if [ "${TERM:-dumb}" = "dumb" ] || [ "${TERM:-}" = "unknown" ]; then
+        export TERM=xterm-256color
+    fi
+
+    return 0
 }
 
 # Startet einen Systemd-Dienst und aktiviert ihn.
@@ -1633,7 +1642,7 @@ show_text_menu() {
     sorted_keys=$(echo "${!CIS_CATEGORIES[@]}" | tr ' ' '\n' | sort)
 
     # Kategorien anzeigen
-    local categories=("L1" "L1L2" "---")
+    local categories=("L1" "L1L2" "_sep")
     local category_names=("CIS Level 1 (alle Grundhärtungs-Massnahmen)" "CIS Level 1 + 2 (alle Massnahmen)" "──── Trennlinie ────")
     for key in ${sorted_keys}; do
         IFS='|' read -r id title level desc <<< "${CIS_CATEGORIES[$key]}"
@@ -1700,7 +1709,7 @@ show_text_menu() {
                 if [[ "${input}" =~ ^[0-9]+$ ]] && [ "${input}" -ge 1 ] && [ "${input}" -le "${#categories[@]}" ]; then
                     local tag_idx=$((input - 1))
                     local tag="${categories[${tag_idx}]}"
-                    if [ "${tag}" = "---" ]; then
+                    if [ "${tag}" = "_sep" ]; then
                         echo "  → Trennlinie kann nicht ausgewählt werden."
                         continue
                     fi
@@ -1772,8 +1781,8 @@ show_tui() {
     menu_items+=("L1" "CIS Level 1 (alle Grundhärtungs-Massnahmen)" "OFF")
     # Spezial-Option: L1+L2 (alle Massnahmen)
     menu_items+=("L1L2" "CIS Level 1 + 2 (alle Massnahmen)" "OFF")
-    # Trennlinie
-    menu_items+=("---" "────────────────────────────────────────────────────" "OFF")
+    # Trennlinie (Separator, kein gültiger Eintrag)
+    menu_items+=("_sep" "────────────────────────────────────────────────────" "OFF")
 
     # Einzelne Kategorien hinzufügen
     local sorted_keys
@@ -1828,7 +1837,7 @@ show_tui() {
             "L1L2")
                 has_l1l2=true
                 ;;
-            "---")
+            "_sep")
                 # Trennlinie ignorieren
                 ;;
             *)

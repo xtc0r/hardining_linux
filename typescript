@@ -1,0 +1,8 @@
+Script started on 2026-07-15 20:21:43+02:00 [COMMAND="echo 'test' | sudo -S bash -x cis-hardening.sh 2>&1" <not executed on terminal>]
+2
+[sudo] Passwort für herminat0r: Das hat nicht funktioniert, bitte nochmal probieren.
+[sudo] Passwort für herminat0r: 
+sudo: Es wurde kein Passwort angegeben
+sudo: 1 Fehlversuch bei der Passwort-Eingabe
+
+Script done on 2026-07-15 20:21:45+02:00 [COMMAND_EXIT_CODE="1"]
