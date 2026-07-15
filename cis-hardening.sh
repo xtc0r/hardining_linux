@@ -1629,7 +1629,7 @@ show_tui() {
     selection=$(whiptail --title "CIS-Härtung für Debian 13 (Trixie)" \
         --backtitle "cis-hardening.sh - Automatisierte Systemhärtung" \
         --checklist \
-        "Wähle die zu härtenden Bereiche aus:\n\n(CIS Level 1 = Grundhärtung, Level 2 = Erweiterte Härtung)\nMit LEERTASTE auswählen, mit TAB zum Bestätigen wechseln." \
+        "Zu härtende Bereiche auswählen:\n\n(CIS Level 1 = Grundhärtung, Level 2 = Erweiterte Härtung)\nMit LEERTASTE auswählen, mit TAB zum Bestätigen wechseln." \
         30 80 20 \
         "${menu_items[@]}" \
         3>&1 1>&2 2>&3)

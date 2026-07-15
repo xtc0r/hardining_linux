@@ -343,7 +343,7 @@ Uyuni unterstützt Formulare (Forms), mit denen einzelne Härtungskategorien pro
 cis_hardening:
   $type: group
   $name: "CIS-Härtungskategorien"
-  $help: "Wähle die zu härtenden Bereiche. Level 2 nur nach Prüfung aktivieren."
+  $help: "Zu härtende Bereiche auswählen. Level 2 nur nach Prüfung aktivieren."
 
   enabled:
     $type: boolean
