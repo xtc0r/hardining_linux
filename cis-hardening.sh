@@ -260,11 +260,23 @@ mask_service() {
 }
 
 # Prüft ob whiptail verfügbar ist (für TUI-Modus).
+# Falls whiptail nicht installiert ist, wird ein textbasierter Fallback
+# verwendet (bash-select + read). Dies verhindert stumme Fehler durch
+# fehlschlagende apt-get-Installationen.
 check_whiptail() {
-    if ! command -v whiptail &>/dev/null; then
-        log_info "whiptail nicht gefunden. Installiere..."
-        apt-get install -y whiptail >> "${LOG_FILE}" 2>&1
+    if command -v whiptail &>/dev/null; then
+        return 0
     fi
+
+    log_warn "whiptail nicht gefunden. Versuche Installation..."
+    if apt-get install -y whiptail >> "${LOG_FILE}" 2>&1; then
+        log_info "whiptail (installiert)"
+        return 0
+    fi
+
+    log_warn "whiptail-Installation fehlgeschlagen. Verwende textbasiertes Menü."
+    log_warn "Installation mit: apt-get install -y whiptail"
+    return 1
 }
 
 # Startet einen Systemd-Dienst und aktiviert ihn.
@@ -1606,25 +1618,150 @@ harden_maintenance() {
 # TUI (WHIPTAIL-BASIERTE BENUTZEROBERFLÄCHE)
 # ==============================================================================
 
+# Textbasiertes Fallback-Menü (wird verwendet wenn whiptail nicht verfügbar ist).
+# Verwendet bash-select und read für die Kategorieauswahl.
+show_text_menu() {
+    echo ""
+    echo "╔═══════════════════════════════════════════════════════════════╗"
+    echo "║     CIS-Härtung für Debian 13 (Trixie) — Textmodus          ║"
+    echo "╚═══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "Verfügbare Kategorien (mit Leertaste auswählen, mit Enter bestätigen):"
+    echo ""
+
+    local sorted_keys
+    sorted_keys=$(echo "${!CIS_CATEGORIES[@]}" | tr ' ' '\n' | sort)
+
+    # Kategorien anzeigen
+    local categories=("L1" "L1L2" "---")
+    local category_names=("CIS Level 1 (alle Grundhärtungs-Massnahmen)" "CIS Level 1 + 2 (alle Massnahmen)" "──── Trennlinie ────")
+    for key in ${sorted_keys}; do
+        IFS='|' read -r id title level desc <<< "${CIS_CATEGORIES[$key]}"
+        categories+=("${key}")
+        category_names+=("${title} [${level}] - ${desc}")
+    done
+
+    local selected=()
+    local done=false
+
+    while [ "${done}" = false ]; do
+        echo "  ┌─────────────────────────────────────────────────────────────┐"
+        local idx=0
+        for name in "${category_names[@]}"; do
+            local tag="${categories[${idx}]}"
+            local checked=" "
+            for sel in "${selected[@]}"; do
+                if [ "${sel}" = "${tag}" ]; then
+                    checked="*"
+                    break
+                fi
+            done
+            printf "  │ %2d. [%s] %s\n" $((idx + 1)) "${checked}" "${name}"
+            idx=$((idx + 1))
+        done
+        echo "  └─────────────────────────────────────────────────────────────┘"
+        echo ""
+        echo "  Nummer eingeben zum Umschalten, 'a' für alle L1, 'A' für alle L1+L2,"
+        echo "  Enter zum Bestätigen, 'q' zum Abbrechen:"
+        echo -n "  > "
+        read -r input
+
+        case "${input}" in
+            q|Q)
+                echo ""
+                log_info "Härtung abgebrochen."
+                exit 0
+                ;;
+            a)
+                selected=()
+                for key in ${sorted_keys}; do
+                    IFS='|' read -r id title level desc <<< "${CIS_CATEGORIES[$key]}"
+                    if [ "${level}" = "L1" ] || [ "${level}" = "L1+L2" ]; then
+                        selected+=("${key}")
+                    fi
+                done
+                echo "  → Alle CIS Level 1 Kategorien ausgewählt."
+                ;;
+            A)
+                selected=()
+                for key in ${sorted_keys}; do
+                    selected+=("${key}")
+                done
+                echo "  → Alle Kategorien ausgewählt."
+                ;;
+            "")
+                if [ ${#selected[@]} -eq 0 ]; then
+                    echo "  → Keine Kategorien ausgewählt. Abgebrochen."
+                    exit 0
+                fi
+                done=true
+                ;;
+            *)
+                if [[ "${input}" =~ ^[0-9]+$ ]] && [ "${input}" -ge 1 ] && [ "${input}" -le "${#categories[@]}" ]; then
+                    local tag_idx=$((input - 1))
+                    local tag="${categories[${tag_idx}]}"
+                    if [ "${tag}" = "---" ]; then
+                        echo "  → Trennlinie kann nicht ausgewählt werden."
+                        continue
+                    fi
+                    # Prüfen ob bereits ausgewählt
+                    local found=false
+                    local new_selected=()
+                    for sel in "${selected[@]}"; do
+                        if [ "${sel}" = "${tag}" ]; then
+                            found=true
+                            echo "  → '${category_names[${tag_idx}]}' abgewählt."
+                        else
+                            new_selected+=("${sel}")
+                        fi
+                    done
+                    if [ "${found}" = false ]; then
+                        new_selected+=("${tag}")
+                        echo "  → '${category_names[${tag_idx}]}' ausgewählt."
+                    fi
+                    selected=("${new_selected[@]}")
+                else
+                    echo "  → Ungültige Eingabe."
+                fi
+                ;;
+        esac
+        echo ""
+    done
+
+    echo ""
+    local summary=""
+    local all_names=""
+    for cat in "${selected[@]}"; do
+        IFS='|' read -r id title level desc <<< "${CIS_CATEGORIES[$cat]}"
+        summary="${summary}  - ${title} (${level})\n"
+        all_names="${all_names} ${title},"
+    done
+    all_names="${all_names%,}"
+
+    echo "Ausgewählte Bereiche:"
+    echo -e "${summary}"
+    echo -n "Fortfahren? (j/N): "
+    read -r confirm
+    if [ "${confirm:-n}" != "j" ] && [ "${confirm:-n}" != "J" ]; then
+        log_info "Härtung abgebrochen."
+        exit 0
+    fi
+
+    echo ""
+    log_section "Härtung beginnt: ${all_names}"
+    echo ""
+
+    apply_selection "${selected[@]}"
+}
+
 # Zeigt die interaktive TUI zur Auswahl der Härtungskategorien.
 # Die Auswahl wird als Array von Kategorie-IDs an apply_selection() übergeben.
 show_tui() {
-    check_whiptail
-
-    # Terminal-Dimensionen ermitteln für dynamische Fenstergrösse
-    local term_rows
-    local term_cols
-    term_rows=$(tput lines 2>/dev/null || echo 40)
-    term_cols=$(tput cols 2>/dev/null || echo 80)
-
-    # Fenstergrösse: ~70% der Terminal-Höhe, ~85% der Terminal-Breite
-    local dialog_rows=$(( term_rows * 70 / 100 ))
-    local dialog_cols=$(( term_cols * 85 / 100 ))
-    # Auf sinnvolle Mindestgrösse begrenzen
-    [ "${dialog_rows}" -lt 30 ] && dialog_rows=30
-    [ "${dialog_cols}" -lt 80 ] && dialog_cols=80
-    # Listenhöhe: ~60% der Dialoghöhe
-    local list_height=$(( dialog_rows * 60 / 100 ))
+    # whiptail-Verfügbarkeit prüfen, bei Fehler textbasiertes Menü verwenden
+    if ! check_whiptail; then
+        show_text_menu
+        return
+    fi
 
     # Menüpunkte für whiptail --checklist
     # Zwei spezielle Vorauswahl-Optionen am Anfang der Liste
@@ -1635,7 +1772,7 @@ show_tui() {
     menu_items+=("L1" "CIS Level 1 (alle Grundhärtungs-Massnahmen)" "OFF")
     # Spezial-Option: L1+L2 (alle Massnahmen)
     menu_items+=("L1L2" "CIS Level 1 + 2 (alle Massnahmen)" "OFF")
-    # Trennlinie (leerer Eintrag als Platzhalter)
+    # Trennlinie
     menu_items+=("---" "────────────────────────────────────────────────────" "OFF")
 
     # Einzelne Kategorien hinzufügen
@@ -1651,12 +1788,12 @@ show_tui() {
     # TUI anzeigen — mit dynamischer Grösse und Positionierung
     local selection
     selection=$(whiptail --title "CIS-Härtung für Debian 13 (Trixie)" \
-        --backtitle "cis-hardening.sh - Automatisierte Systemhärtung" \
-        --checklist \
-        "Zu härtende Bereiche auswählen:\n\n(CIS Level 1 = Grundhärtung, Level 2 = Erweiterte Härtung)\nMit LEERTASTE auswählen, mit TAB zum Bestätigen wechseln." \
-        "${dialog_rows}" "${dialog_cols}" "${list_height}" \
-        "${menu_items[@]}" \
-        3>&1 1>&2 2>&3)
+            --backtitle "cis-hardening.sh - Automatisierte Systemhärtung" \
+            --checklist \
+            "Zu härtende Bereiche auswählen:\n\n(CIS Level 1 = Grundhärtung, Level 2 = Erweiterte Härtung)\nMit LEERTASTE auswählen, mit TAB zum Bestätigen wechseln." \
+            40 110 24 \
+            "${menu_items[@]}" \
+            3>&1 1>&2 2>&3)
 
     local exit_code=$?
     if [ ${exit_code} -ne 0 ]; then
