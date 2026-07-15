@@ -11,8 +11,9 @@ Automatisierte Härtung von Debian-13-Systemen nach **FIPS 140-3** und **CIS Ben
 3. [Schnellstart](#schnellstart)
 4. [Mass Deployment mit Wazuh](#mass-deployment-mit-wazuh)
 5. [Mass Deployment mit Uyuni](#mass-deployment-mit-uyuni)
-6. [Verifikation](#verifikation)
-7. [Compliance-Mapping](#compliance-mapping)
+6. [Syslog-Integration und zentrales Logging](#syslog-integration-und-zentrales-logging)
+7. [Verifikation](#verifikation)
+8. [Compliance-Mapping](#compliance-mapping)
 
 ---
 
@@ -45,9 +46,17 @@ Die drei Härtungsstufen unterscheiden sich in **Umfang, Zielsetzung und Eingrif
 
 ## Dateien
 
+| Datei | Beschreibung | Detaildokumentation |
+|-------|-------------|---------------------|
+| `enable-debian-fips.sh` | FIPS 140-3 Aktivierung | [fips-hardening.md](fips-hardening.md) |
+| `cis-hardening.sh` | CIS Level 1 + Level 2 Härtung | [cis-hardening.md](cis-hardening.md) |
+| `wazuh-sca-cis-debian-13.yml` | Wazuh SCA Policy für Health-Scoring | [cis-hardening.md](cis-hardening.md#syslog-integration) |
+
 ### `enable-debian-fips.sh`
 
 **Zweck:** Aktiviert den FIPS 140-3-Modus auf Debian 13.
+
+**Detaildokumentation:** [fips-hardening.md](fips-hardening.md) — alle 5 Prüfpunkte mit Erklärung, Konfiguration und Verifikation.
 
 **Was passiert:**
 
@@ -76,6 +85,8 @@ echo 'test' | openssl dgst -md5          # Muss fehlschlagen (MD5 nicht FIPS-kon
 ### `cis-hardening.sh`
 
 **Zweck:** Härtet ein Debian-13-System nach CIS Benchmark for Debian Linux (Level 1 + Level 2).
+
+**Detaildokumentation:** [cis-hardening.md](cis-hardening.md) — alle 13 Kategorien mit vollständiger Prüfpunkt-Beschreibung, Konfiguration und Verifikation.
 
 **13 Kategorien:**
 
@@ -469,6 +480,97 @@ Phase 3: Produktion (alle Systeme)
 
 ---
 
+## Syslog-Integration und zentrales Logging
+
+Beide Härtungsscripts senden alle Meldungen über `logger(1)` an den Syslog-Daemon. Dadurch können die Logs von einem zentralen Log-Server (z.B. Graylog, ELK, rsyslog) erfasst, gefiltert und ausgewertet werden.
+
+### Syslog-Tags und Facilities
+
+| Script | Tag | Facility | Prioritäten |
+|--------|-----|----------|-------------|
+| `enable-debian-fips.sh` | `FIPS-HARDENING` | `local0` | `info`, `notice`, `warning`, `err` |
+| `cis-hardening.sh` | `CIS-HARDENING` | `local0` | `info`, `notice`, `warning`, `err` |
+
+### Log-Ausgaben im Detail
+
+**`enable-debian-fips.sh` — FIPS-HARDENING:**
+
+```
+INFO: Erstelle ein Backup der GRUB-Konfiguration...
+INFO: Fuege 'fips=1' zu GRUB_CMDLINE_LINUX_DEFAULT hinzu...
+NOTICE: FIPS-Vorbereitungen abgeschlossen.
+ERR: Die Datei fips.so konnte im System nicht lokalisiert werden.
+```
+
+**`cis-hardening.sh` — CIS-HARDENING:**
+
+```
+INFO: STEP [1/18]: CIS 3.1.1: IP-Forwarding deaktivieren
+NOTICE: OK: sysctl net.ipv4.ip_forward = 0 (gesetzt)
+WARNING: WARN: Einige Paketquellen haben keine explizite GPG-Signaturprüfung
+ERR: FEHLER: SSH-Konfiguration fehlerhaft. Bitte pruefen: sshd -t
+```
+
+### Rsyslog-Forwarding zum zentralen Log-Server
+
+Damit die Härtungslogs auf einem zentralen Server (z.B. Graylog unter `192.168.3.15:1514`) ankommen, wird eine rsyslog-Forward-Regel konfiguriert.
+
+**Datei: `/etc/rsyslog.d/90-hardening-forward.conf`**
+
+```
+# Härtungs-Logs aller Systeme an zentralen Log-Server senden
+local0.*  @192.168.3.15:1514
+```
+
+**Aktivierung:**
+
+```bash
+systemctl restart rsyslog
+```
+
+**Filter im zentralen Log-Server (Graylog):**
+
+Nach Graylog-Query-Sprache:
+```
+application_name:FIPS-HARDENING
+application_name:CIS-HARDENING
+```
+
+**Verwendung in der Uyuni-Salt-State-Integration:**
+
+Das Rsyslog-Forwarding kann als Salt State auf allen verwalteten Systemen ausgerollt werden:
+
+```sls
+# salt/hardening-logging/init.sls
+hardening-rsyslog-forward:
+  file.managed:
+    - name: /etc/rsyslog.d/90-hardening-forward.conf
+    - contents: |
+        # Härtungs-Logs an zentralen Log-Server senden
+        local0.*  @192.168.3.15:1514
+    - mode: 644
+    - owner: root
+    - group: root
+    - notify:
+      - service: rsyslog-restart
+
+rsyslog-restart:
+  service.running:
+    - name: rsyslog
+    - enable: True
+```
+
+### Lokale Log-Dateien
+
+Zusätzlich zum Syslog schreiben die Scripts in lokale Log-Dateien:
+
+| Script | Log-Datei |
+|--------|-----------|
+| `enable-debian-fips.sh` | Konsolenausgabe (Stdout/Stderr) |
+| `cis-hardening.sh` | `/var/log/cis-hardening.log` |
+
+---
+
 ## Verifikation
 
 ### Kernel- und FIPS-Status
@@ -608,4 +710,5 @@ Pull Requests sind willkommen. Für grössere Änderungen bitte vorher ein Issue
 - Backups vor jeder Konfigurationsänderung
 - Keine DU/SIE-Ansprache — neutrale Formulierungen
 - Kommentare in Deutsch (Zielgruppe: deutschsprachige Administratoren)
+- **Syslog-Integration:** Alle Meldungen müssen zusätzlich über `logger` an den Syslog-Daemon gesendet werden (Facility `local0`, Tag `FIPS-HARDENING` oder `CIS-HARDENING`)
 - SCA-Checks im YAML müssen mit den Script-Regeln korrespondieren

@@ -90,21 +90,29 @@ else
     COLOR_DIM=''
 fi
 
-# Logging-Funktionen
+# Logging-Funktionen mit Syslog-Integration.
+# Alle Ausgaben werden zusätzlich über logger(1) an den Syslog-Daemon
+# gesendet (Facility local0, Tag CIS-HARDENING). Der zentrale Log-Server
+# kann über die rsyslog-Konfiguration auf local0.* filtern.
+# Siehe README.md → Abschnitt "Syslog-Integration und zentrales Logging".
 log_info() {
     echo -e "${COLOR_BLUE}[INFO]${COLOR_RESET} $*" | tee -a "${LOG_FILE}"
+    logger -t CIS-HARDENING -p local0.info "INFO: $*"
 }
 
 log_ok() {
     echo -e "${COLOR_GREEN}[OK]${COLOR_RESET} $*" | tee -a "${LOG_FILE}"
+    logger -t CIS-HARDENING -p local0.notice "OK: $*"
 }
 
 log_warn() {
     echo -e "${COLOR_YELLOW}[WARN]${COLOR_RESET} $*" | tee -a "${LOG_FILE}"
+    logger -t CIS-HARDENING -p local0.warning "WARN: $*"
 }
 
 log_error() {
     echo -e "${COLOR_RED}[FEHLER]${COLOR_RESET} $*" >&2 | tee -a "${LOG_FILE}" >&2
+    logger -t CIS-HARDENING -p local0.err "FEHLER: $*"
 }
 
 log_section() {
@@ -114,6 +122,7 @@ log_section() {
     echo -e "${COLOR_BOLD}${COLOR_CYAN}${title}${COLOR_RESET}"
     echo -e "${COLOR_DIM}${separator}${COLOR_RESET}"
     echo "" | tee -a "${LOG_FILE}"
+    logger -t CIS-HARDENING -p local0.info "SECTION: ${title}"
 }
 
 log_step() {
@@ -121,6 +130,7 @@ log_step() {
     local total="$2"
     local message="$3"
     echo -e "${COLOR_MAGENTA}[${step}/${total}]${COLOR_RESET} ${message}" | tee -a "${LOG_FILE}"
+    logger -t CIS-HARDENING -p local0.info "STEP [${step}/${total}]: ${message}"
 }
 
 # ==============================================================================
