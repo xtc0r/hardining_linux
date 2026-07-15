@@ -16,7 +16,7 @@ set -euo pipefail
 # ------------------------------------------------------------------------------
 # Es wird verifiziert, ob das Skript mit administrativen Rechten (root) gestartet wurde.
 if [ "$(id -u)" -ne 0 ]; then
-    echo "[FEHLER] Dieses Skript muss mit Root-Rechten ausgeführt werden." >&2
+    echo "[FEHLER] Dieses Skript muss mit Root-Rechten ausgefuehrt werden." >&2
     exit 1
 fi
 
@@ -34,44 +34,52 @@ fi
 
 # Validierung, ob das System Debian in der Version 13 ist
 if [ "${ID:-}" != "debian" ] || [ "${VERSION_ID:-}" != "13" ]; then
-    echo "[WARNUNG] Dieses Skript wurde speziell für Debian 13 (Trixie) entwickelt." >&2
+    echo "[WARNUNG] Dieses Skript wurde speziell fuer Debian 13 (Trixie) entwickelt." >&2
     echo "Aktuelles System: ${NAME:-Unbekannt} Version: ${VERSION_ID:-Unbekannt}" >&2
-    echo "Soll die Ausführung dennoch fortgesetzt werden? (Eingabetaste drücken, andernfalls Strg+C)"
+    echo "Soll die Ausfuehrung dennoch fortgesetzt werden? (Eingabetaste druecken, andernfalls Strg+C)"
     read -r _
 fi
 
 # ------------------------------------------------------------------------------
 # 3. KERNEL-FIPS-PARAMETRIERUNG ÜBER GRUB
 # ------------------------------------------------------------------------------
-# Um dem Kernel beim Booten den FIPS-Selbsttest vorzuschreiben, muss der 
-# Parameter 'fips=1' an die Kernel-Kommandozeile angehängt werden.
+# Um dem Kernel beim Booten den FIPS-Selbsttest vorzuschreiben, muss der
+# Parameter 'fips=1' an die Kernel-Kommandozeile angehaengt werden.
+# Dies wird sowohl in GRUB_CMDLINE_LINUX_DEFAULT (normaler Boot) als auch
+# in GRUB_CMDLINE_LINUX (Recovery-Mode) gesetzt.
 GRUB_CONFIG="/etc/default/grub"
 GRUB_BACKUP="/etc/default/grub.bak-$(date +%Y%m%d%H%M%S)"
 
 echo "[INFO] Erstelle ein Backup der GRUB-Konfiguration unter ${GRUB_BACKUP}..."
 cp "${GRUB_CONFIG}" "${GRUB_BACKUP}"
 
-# Einfügen von 'fips=1' in die Zeile GRUB_CMDLINE_LINUX_DEFAULT, falls nicht bereits vorhanden.
-if grep -q "GRUB_CMDLINE_LINUX_DEFAULT" "${GRUB_CONFIG}"; then
-    if ! grep -q "fips=1" "${GRUB_CONFIG}"; then
-        echo "[INFO] Füge 'fips=1' zu GRUB_CMDLINE_LINUX_DEFAULT hinzu..."
-        sed -i 's/\(GRUB_CMDLINE_LINUX_DEFAULT="[^"]*\)"/\1 fips=1"/' "${GRUB_CONFIG}"
+# Hilfsfunktion: fuegt fips=1 zu einer GRUB-Variablen hinzu, falls nicht vorhanden.
+add_fips_to_grub_var() {
+    local var_name="$1"
+    if grep -q "^${var_name}=" "${GRUB_CONFIG}"; then
+        if ! grep -q "^${var_name}=.*fips=1" "${GRUB_CONFIG}"; then
+            echo "[INFO] Fuege 'fips=1' zu ${var_name} hinzu..."
+            sed -i "s/^\(${var_name}=\"[^\"]*\)\"/\1 fips=1\"/" "${GRUB_CONFIG}"
+        else
+            echo "[INFO] 'fips=1' ist bereits in ${var_name} konfiguriert."
+        fi
     else
-        echo "[INFO] 'fips=1' ist bereits in GRUB_CMDLINE_LINUX_DEFAULT konfiguriert."
+        echo "[INFO] ${var_name} existiert nicht in der Konfiguration. Lege sie an..."
+        echo "${var_name}=\"fips=1\"" >> "${GRUB_CONFIG}"
     fi
-else
-    echo "[FEHLER] GRUB_CMDLINE_LINUX_DEFAULT wurde in ${GRUB_CONFIG} nicht gefunden." >&2
-    exit 1
-fi
+}
 
-# Aktualisierung des Bootloaders, um die Änderungen in /boot/grub/grub.cfg zu schreiben.
+add_fips_to_grub_var "GRUB_CMDLINE_LINUX_DEFAULT"
+add_fips_to_grub_var "GRUB_CMDLINE_LINUX"
+
+# Aktualisierung des Bootloaders, um die Aenderungen in /boot/grub/grub.cfg zu schreiben.
 echo "[INFO] Aktualisiere GRUB..."
 update-grub
 
 # ------------------------------------------------------------------------------
 # 4. INSTALLATION DES OPENSSL FIPS PROVIDERS
 # ------------------------------------------------------------------------------
-# Unter Debian 13 wird die FIPS-Implementierung für OpenSSL über das Paket 
+# Unter Debian 13 wird die FIPS-Implementierung fuer OpenSSL ueber das Paket
 # 'openssl-provider-fips' bereitgestellt.
 echo "[INFO] Aktualisiere APT-Paketquellen..."
 apt-get update
@@ -82,9 +90,9 @@ apt-get install -y openssl-provider-fips
 # ------------------------------------------------------------------------------
 # 5. INITIALISIERUNG DES FIPS-MODULS (FIPSINSTALL)
 # ------------------------------------------------------------------------------
-# Der OpenSSL FIPS-Provider erfordert die Erstellung einer fipsmodule.cnf, 
-# welche die Integritätsprüfung (MAC-Adresse der fips.so) sowie Status-Flags 
-# der kryptografischen Selbsttests (KATs) enthält.
+# Der OpenSSL FIPS-Provider erfordert die Erstellung einer fipsmodule.cnf,
+# welche die Integritaetspruefung (MAC-Adresse der fips.so) sowie Status-Flags
+# der kryptografischen Selbsttests (KATs) enthaelt.
 ARCH_TRIPLET=$(dpkg-architecture -q DEB_HOST_MULTIARCH 2>/dev/null || echo "x86_64-linux-gnu")
 FIPS_SO_PATH="/usr/lib/${ARCH_TRIPLET}/ossl-modules/fips.so"
 FIPS_CNF_PATH="/etc/ssl/fipsmodule.cnf"
@@ -105,17 +113,25 @@ openssl fipsinstall -out "${FIPS_CNF_PATH}" -module "${FIPS_SO_PATH}"
 # ------------------------------------------------------------------------------
 # 6. SYSTEMWEITE OPENSSL-KONFIGURATION ANPASSEN
 # ------------------------------------------------------------------------------
-# Die Konfigurationsdatei /etc/ssl/openssl.cnf muss angepasst werden, um 
-# den FIPS-Provider standardmäßig zu laden und unzulässige Altkryptografie zu sperren.
+# Die Konfigurationsdatei /etc/ssl/openssl.cnf muss angepasst werden, um
+# den FIPS-Provider standardmaessig zu laden und unzulaessige Altkryptografie zu sperren.
 OPENSSL_CNF="/etc/ssl/openssl.cnf"
 OPENSSL_CNF_BACKUP="/etc/ssl/openssl.cnf.bak-$(date +%Y%m%d%H%M%S)"
 
 echo "[INFO] Erstelle ein Backup von ${OPENSSL_CNF} unter ${OPENSSL_CNF_BACKUP}..."
 cp "${OPENSSL_CNF}" "${OPENSSL_CNF_BACKUP}"
 
-# Einbinden der generierten fipsmodule.cnf am Anfang der openssl.cnf Datei.
-if ! grep -q "fipsmodule.cnf" "${OPENSSL_CNF}"; then
-    echo "[INFO] Inkludiere fipsmodule.cnf in die Hauptkonfiguration..."
+# Einbinden der generierten fipsmodule.cnf in die openssl.cnf.
+# Die Debian-Standard-openssl.cnf enthaelt eine kommentierte .include-Zeile.
+# Der grep auf "fipsmodule.cnf" wuerde auch auf den Kommentar matchen.
+# Daher wird hier zunaechst auf eine vorhandene, noch kommentierte Direktive
+# geprueft und diese aktiviert. Erst wenn gar keine Referenz existiert, wird
+# eine neue .include-Zeile an Position 1 eingefuegt.
+if grep -q "^# \.include fipsmodule\.cnf" "${OPENSSL_CNF}"; then
+    echo "[INFO] Aktiviere vorhandene .include-Direktive fuer fipsmodule.cnf..."
+    sed -i 's|^# \.include fipsmodule\.cnf|.include /etc/ssl/fipsmodule.cnf|' "${OPENSSL_CNF}"
+elif ! grep -q "^\.include.*fipsmodule\.cnf" "${OPENSSL_CNF}"; then
+    echo "[INFO] Fuege .include-Direktive fuer fipsmodule.cnf ein..."
     sed -i '1i .include /etc/ssl/fipsmodule.cnf' "${OPENSSL_CNF}"
 fi
 
@@ -133,7 +149,18 @@ sed -i 's/^#\s*providers = provider_sect/providers = provider_sect/' "${OPENSSL_
 sed -i 's/^#\s*\[provider_sect\]/\[provider_sect\]/' "${OPENSSL_CNF}"
 sed -i 's/^#\s*fips = fips_sect/fips = fips_sect/' "${OPENSSL_CNF}"
 
-# Der Base-Provider wird benötigt, um unkritische Hilfsfunktionen (z.B. Dateikodierungen) bereitzustellen.
+# Default-Provider aktivieren. Der Debian-Standard hat den Default-Provider
+# in [provider_sect] gelistet, aber '# activate = 1' in [default_sect] ist
+# auskommentiert. Ohne Aktivierung stehen viele kryptografische Basis-
+# funktionen nicht zur Verfuegung. Die default_properties = fips=yes
+# (siehe unten) stellt sicher, dass trotz aktivem Default-Provider nur
+# FIPS-konforme Algorithmen angeboten werden.
+if grep -q "^# activate = 1" "${OPENSSL_CNF}"; then
+    echo "[INFO] Aktiviere Default-Provider..."
+    sed -i 's/^# activate = 1/activate = 1/' "${OPENSSL_CNF}"
+fi
+
+# Der Base-Provider wird benoetigt, um unkritische Hilfsfunktionen (z.B. Dateikodierungen) bereitzustellen.
 if ! grep -q "base = base_sect" "${OPENSSL_CNF}"; then
     sed -i '/\[provider_sect\]/a base = base_sect' "${OPENSSL_CNF}"
 fi
@@ -146,8 +173,8 @@ activate = 1
 EOF
 fi
 
-# Durch das Setzen der 'default_properties' auf 'fips=yes' wird sichergestellt, 
-# dass OpenSSL ausschließlich FIPS-konforme Algorithmen anbietet und lädt.
+# Durch das Setzen der 'default_properties' auf 'fips=yes' wird sichergestellt,
+# dass OpenSSL ausschliesslich FIPS-konforme Algorithmen anbietet und laedt.
 if ! grep -q "\[alg_section\]" "${OPENSSL_CNF}"; then
     cat << 'EOF' >> "${OPENSSL_CNF}"
 
@@ -161,9 +188,9 @@ fi
 # ------------------------------------------------------------------------------
 # 7. REGENERIERUNG DER RAMDISK (INITRAMFS)
 # ------------------------------------------------------------------------------
-# Um sicherzustellen, dass die kryptografischen Integritätsprüfungen beim Booten 
+# Um sicherzustellen, dass die kryptografischen Integritaetspruefungen beim Booten
 # korrekt initialisiert werden, muss die Initial Ramdisk neu erstellt werden.
-echo "[INFO] Regeneriere das Initramfs für alle installierten Kernel..."
+echo "[INFO] Regeneriere das Initramfs fuer alle installierten Kernel..."
 update-initramfs -u -k all
 
 # ------------------------------------------------------------------------------
@@ -175,10 +202,13 @@ echo "==========================================================================
 echo "Wichtige Schritte zur Finalisierung:"
 echo "1. System neustarten, um den Kernel-FIPS-Modus zu aktivieren:"
 echo "   sudo reboot"
-echo "2. Nach dem Neustart verifizieren Sie den Kernel-Status über:"
+echo "2. Nach dem Neustart verifizieren Sie den Kernel-Status ueber:"
 echo "   cat /proc/sys/crypto/fips_enabled"
-echo "   (Muss den Wert '1' zurückgeben)"
-echo "3. Überprüfung erfolgreiche OpenSSL-Aktivierung mit:"
+echo "   (Muss den Wert '1' zurueckgeben)"
+echo "3. Ueberpruefung erfolgreiche OpenSSL-Aktivierung mit:"
 echo "   openssl list -providers -provider fips"
-echo "   (Der 'OpenSSL FIPS Provider' muss als 'active' aufgeführt werden)"
+echo "   (Der 'OpenSSL FIPS Provider' muss als 'active' aufgefuehrt sein)"
+echo "4. Zusaetzliche Verifikation des FIPS-Enforcements:"
+echo "   echo 'test' | openssl dgst -md5"
+echo "   (Muss fehlschlagen - MD5 ist nicht FIPS-konform)"
 echo "=============================================================================="
