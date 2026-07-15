@@ -1611,26 +1611,50 @@ harden_maintenance() {
 show_tui() {
     check_whiptail
 
+    # Terminal-Dimensionen ermitteln für dynamische Fenstergrösse
+    local term_rows
+    local term_cols
+    term_rows=$(tput lines 2>/dev/null || echo 40)
+    term_cols=$(tput cols 2>/dev/null || echo 80)
+
+    # Fenstergrösse: ~70% der Terminal-Höhe, ~85% der Terminal-Breite
+    local dialog_rows=$(( term_rows * 70 / 100 ))
+    local dialog_cols=$(( term_cols * 85 / 100 ))
+    # Auf sinnvolle Mindestgrösse begrenzen
+    [ "${dialog_rows}" -lt 30 ] && dialog_rows=30
+    [ "${dialog_cols}" -lt 80 ] && dialog_cols=80
+    # Listenhöhe: ~60% der Dialoghöhe
+    local list_height=$(( dialog_rows * 60 / 100 ))
+
     # Menüpunkte für whiptail --checklist
+    # Zwei spezielle Vorauswahl-Optionen am Anfang der Liste
     # Format: "tag" "description" status
     local menu_items=()
+
+    # Spezial-Option: L1 (alle CIS Level 1)
+    menu_items+=("L1" "CIS Level 1 (alle Grundhärtungs-Massnahmen)" "OFF")
+    # Spezial-Option: L1+L2 (alle Massnahmen)
+    menu_items+=("L1L2" "CIS Level 1 + 2 (alle Massnahmen)" "OFF")
+    # Trennlinie (leerer Eintrag als Platzhalter)
+    menu_items+=("---" "────────────────────────────────────────────────────" "OFF")
+
+    # Einzelne Kategorien hinzufügen
     local sorted_keys
     sorted_keys=$(echo "${!CIS_CATEGORIES[@]}" | tr ' ' '\n' | sort)
 
     for key in ${sorted_keys}; do
         IFS='|' read -r id title level desc <<< "${CIS_CATEGORIES[$key]}"
-        # Level-Farbe simulieren
         local level_label="[${level}]"
         menu_items+=("${key}" "${title} ${level_label} - ${desc}" "OFF")
     done
 
-    # TUI anzeigen
+    # TUI anzeigen — mit dynamischer Grösse und Positionierung
     local selection
     selection=$(whiptail --title "CIS-Härtung für Debian 13 (Trixie)" \
         --backtitle "cis-hardening.sh - Automatisierte Systemhärtung" \
         --checklist \
         "Zu härtende Bereiche auswählen:\n\n(CIS Level 1 = Grundhärtung, Level 2 = Erweiterte Härtung)\nMit LEERTASTE auswählen, mit TAB zum Bestätigen wechseln." \
-        30 80 20 \
+        "${dialog_rows}" "${dialog_cols}" "${list_height}" \
         "${menu_items[@]}" \
         3>&1 1>&2 2>&3)
 
@@ -1643,14 +1667,55 @@ show_tui() {
 
     # Auswahl parsen und in Array umwandeln
     # whiptail gibt quoted strings zurück: "filesystem" "network" ...
-    local selected_categories=()
-    eval "selected_categories=(${selection})"
+    local raw_selection=()
+    eval "raw_selection=(${selection})"
 
-    if [ ${#selected_categories[@]} -eq 0 ]; then
+    if [ ${#raw_selection[@]} -eq 0 ]; then
         whiptail --title "Keine Auswahl" \
             --msgbox "Es wurde kein Bereich ausgewählt.\n\nDie Härtung wird abgebrochen." 8 50
         log_info "Keine Bereiche ausgewählt. Abgebrochen."
         exit 0
+    fi
+
+    # Spezial-Optionen expandieren: "L1" → alle Kategorien mit Level 1
+    # "L1L2" → alle Kategorien
+    local selected_categories=()
+    local has_l1=false
+    local has_l1l2=false
+
+    for item in "${raw_selection[@]}"; do
+        case "${item}" in
+            "L1")
+                has_l1=true
+                ;;
+            "L1L2")
+                has_l1l2=true
+                ;;
+            "---")
+                # Trennlinie ignorieren
+                ;;
+            *)
+                selected_categories+=("${item}")
+                ;;
+        esac
+    done
+
+    # Wenn L1L2 gewählt, alle Kategorien übernehmen
+    if [ "${has_l1l2}" = true ]; then
+        selected_categories=()
+        for key in $(echo "${!CIS_CATEGORIES[@]}" | tr ' ' '\n' | sort); do
+            selected_categories+=("${key}")
+        done
+    # Wenn nur L1 gewählt, alle Kategorien mit Level-1-Anteil übernehmen
+    elif [ "${has_l1}" = true ]; then
+        selected_categories=()
+        for key in $(echo "${!CIS_CATEGORIES[@]}" | tr ' ' '\n' | sort); do
+            IFS='|' read -r id title level desc <<< "${CIS_CATEGORIES[$key]}"
+            # Kategorien einschliessen, die L1 oder L1+L2 sind
+            if [ "${level}" = "L1" ] || [ "${level}" = "L1+L2" ]; then
+                selected_categories+=("${key}")
+            fi
+        done
     fi
 
     # Bestätigungsdialog
@@ -1769,6 +1834,9 @@ KATEGORIEN (für Headless-Modus):
 BEISPIELE:
   # Interaktive TUI (Standard)
   sudo ./cis-hardening.sh
+
+  # In der TUI: L1 auswählen = alle CIS Level 1 Massnahmen
+  # In der TUI: L1+L2 auswählen = alle Massnahmen (Level 1 + 2)
 
   # Alle Massnahmen ohne TUI anwenden
   sudo ./cis-hardening.sh --all --headless
