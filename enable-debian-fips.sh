@@ -170,15 +170,15 @@ update-initramfs -u -k all
 # 8. ABSCHLIESSENDE VERIFIZIERUNGSHINWEISE
 # ------------------------------------------------------------------------------
 echo "=============================================================================="
-echo "[ERFOLG] Die FIPS-Vorbereitungen auf Ihrem Debian 13 System sind abgeschlossen."
+echo "[ERFOLG] FIPS-Vorbereitungen abgeschlossen."
 echo "=============================================================================="
 echo "Wichtige Schritte zur Finalisierung:"
-echo "1. Starten Sie das System neu, um den Kernel-FIPS-Modus zu aktivieren:"
+echo "1. System neustarten, um den Kernel-FIPS-Modus zu aktivieren:"
 echo "   sudo reboot"
 echo "2. Nach dem Neustart verifizieren Sie den Kernel-Status über:"
 echo "   cat /proc/sys/crypto/fips_enabled"
 echo "   (Muss den Wert '1' zurückgeben)"
-echo "3. Überprüfen Sie die erfolgreiche OpenSSL-Aktivierung mit:"
+echo "3. Überprüfung erfolgreiche OpenSSL-Aktivierung mit:"
 echo "   openssl list -providers -provider fips"
 echo "   (Der 'OpenSSL FIPS Provider' muss als 'active' aufgeführt werden)"
 echo "=============================================================================="
