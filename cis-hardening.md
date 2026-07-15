@@ -897,13 +897,9 @@ Das Script `cis-hardening.sh` sendet alle Meldungen über `logger(1)` an den Sys
 | `CIS-HARDENING` | `local0` | `warning` | Warnungen (`[WARN]`) |
 | `CIS-HARDENING` | `local0` | `err` | Fehler (`[FEHLER]`) |
 
-**Filter im zentralen Log-Server (Graylog):**
+**Filter im zentralen Log-Server:**
 ```
 application_name:CIS-HARDENING
 ```
 
-**Rsyslog-Forwarding zum zentralen Log-Server (192.168.3.15:1514):**
-```
-# /etc/rsyslog.d/90-hardening-forward.conf
-local0.*  @192.168.3.15:1514
-```
+**Hinweis:** Die Scripts senden nur an den **lokalen** Syslog-Daemon. Wenn auf dem System ein Rsyslog-Forwarding zum zentralen Log-Server konfiguriert ist, werden die Härtungslogs automatisch mit übertragen. Es ist keine zusätzliche Konfiguration für die Härtungslogs erforderlich.

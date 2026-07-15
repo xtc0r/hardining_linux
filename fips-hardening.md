@@ -191,7 +191,7 @@ Das Script sendet alle Meldungen über `logger(1)` an den Syslog-Daemon:
 | `FIPS-HARDENING` | `local0` | `err` | Fehler (z.B. fips.so nicht gefunden) |
 | `FIPS-HARDENING` | `local0` | `notice` | Erfolgsmeldungen (Abschluss) |
 
-**Filter im zentralen Log-Server (Graylog):**
+**Filter im zentralen Log-Server:**
 ```
 application_name:FIPS-HARDENING
 ```

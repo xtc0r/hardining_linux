@@ -7,8 +7,7 @@
 #               die Konfiguration des OpenSSL 3 FIPS-Providers.
 # AUSGABE:      Alle Meldungen werden sowohl auf der Konsole als auch über
 #               syslog (local0, Tag FIPS-HARDENING) ausgegeben, sodass sie
-#               von einem zentralen Log-Server (z.B. Graylog, rsyslog)
-#               erfasst und ausgewertet werden können.
+#               von einem zentralen Log-Server erfasst und ausgewertet werden können.
 # ANFORDERUNGEN: Ausführung mit Root-Privilegien (sudo / root).
 # ==============================================================================
 

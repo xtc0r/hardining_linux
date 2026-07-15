@@ -482,7 +482,7 @@ Phase 3: Produktion (alle Systeme)
 
 ## Syslog-Integration und zentrales Logging
 
-Beide Härtungsscripts senden alle Meldungen über `logger(1)` an den Syslog-Daemon. Dadurch können die Logs von einem zentralen Log-Server (z.B. Graylog, ELK, rsyslog) erfasst, gefiltert und ausgewertet werden.
+Beide Härtungsscripts senden alle Meldungen über `logger(1)` an den Syslog-Daemon. Dadurch können die Logs von einem zentralen Log-Server erfasst, gefiltert und ausgewertet werden.
 
 ### Syslog-Tags und Facilities
 
@@ -511,57 +511,18 @@ WARNING: WARN: Einige Paketquellen haben keine explizite GPG-Signaturprüfung
 ERR: FEHLER: SSH-Konfiguration fehlerhaft. Bitte pruefen: sshd -t
 ```
 
-### Rsyslog-Forwarding zum zentralen Log-Server
+### Zentrale Log-Erfassung
 
-Damit die Härtungslogs auf einem zentralen Server (z.B. Graylog unter `192.168.3.15:1514`) ankommen, wird eine rsyslog-Forward-Regel konfiguriert.
+Die Scripts senden alle Meldungen an den **lokalen** Syslog-Daemon. Wenn auf dem System bereits ein Rsyslog-Forwarding zu einem zentralen Log-Server konfiguriert ist (z.B. über `*.* @zentraler-server:514`), werden die Härtungslogs automatisch mit übertragen — es ist keine zusätzliche Konfiguration erforderlich.
 
-**Datei: `/etc/rsyslog.d/90-hardening-forward.conf`**
+Die Logs sind über die Tags `FIPS-HARDENING` und `CIS-HARDENING` sowie die Facility `local0` eindeutig identifizierbar. Ein zentraler Log-Server kann wie folgt filtern:
 
-```
-# Härtungs-Logs aller Systeme an zentralen Log-Server senden
-local0.*  @192.168.3.15:1514
-```
-
-**Aktivierung:**
-
-```bash
-systemctl restart rsyslog
-```
-
-**Filter im zentralen Log-Server (Graylog):**
-
-Nach Graylog-Query-Sprache:
 ```
 application_name:FIPS-HARDENING
 application_name:CIS-HARDENING
 ```
 
-**Verwendung in der Uyuni-Salt-State-Integration:**
-
-Das Rsyslog-Forwarding kann als Salt State auf allen verwalteten Systemen ausgerollt werden:
-
-```sls
-# salt/hardening-logging/init.sls
-hardening-rsyslog-forward:
-  file.managed:
-    - name: /etc/rsyslog.d/90-hardening-forward.conf
-    - contents: |
-        # Härtungs-Logs an zentralen Log-Server senden
-        local0.*  @192.168.3.15:1514
-    - mode: 644
-    - owner: root
-    - group: root
-    - notify:
-      - service: rsyslog-restart
-
-rsyslog-restart:
-  service.running:
-    - name: rsyslog
-    - enable: True
-```
-
 ### Lokale Log-Dateien
-
 Zusätzlich zum Syslog schreiben die Scripts in lokale Log-Dateien:
 
 | Script | Log-Datei |
