@@ -1642,8 +1642,8 @@ show_text_menu() {
     sorted_keys=$(echo "${!CIS_CATEGORIES[@]}" | tr ' ' '\n' | sort)
 
     # Kategorien anzeigen
-    local categories=("L1" "L1L2" "_sep")
-    local category_names=("CIS Level 1 (alle Grundhärtungs-Massnahmen)" "CIS Level 1 + 2 (alle Massnahmen)" "──── Trennlinie ────")
+    local categories=("L1" "L1L2")
+    local category_names=("CIS Level 1 (alle Grundhärtungs-Massnahmen)" "CIS Level 1 + 2 (alle Massnahmen)")
     for key in ${sorted_keys}; do
         IFS='|' read -r id title level desc <<< "${CIS_CATEGORIES[$key]}"
         categories+=("${key}")
@@ -1709,10 +1709,6 @@ show_text_menu() {
                 if [[ "${input}" =~ ^[0-9]+$ ]] && [ "${input}" -ge 1 ] && [ "${input}" -le "${#categories[@]}" ]; then
                     local tag_idx=$((input - 1))
                     local tag="${categories[${tag_idx}]}"
-                    if [ "${tag}" = "_sep" ]; then
-                        echo "  → Trennlinie kann nicht ausgewählt werden."
-                        continue
-                    fi
                     # Prüfen ob bereits ausgewählt
                     local found=false
                     local new_selected=()
@@ -1781,8 +1777,6 @@ show_tui() {
     menu_items+=("L1" "CIS Level 1 (alle Grundhärtungs-Massnahmen)" "OFF")
     # Spezial-Option: L1+L2 (alle Massnahmen)
     menu_items+=("L1L2" "CIS Level 1 + 2 (alle Massnahmen)" "OFF")
-    # Trennlinie (Separator, kein gültiger Eintrag)
-    menu_items+=("_sep" "────────────────────────────────────────────────────" "OFF")
 
     # Einzelne Kategorien hinzufügen
     local sorted_keys
@@ -1800,7 +1794,7 @@ show_tui() {
             --backtitle "cis-hardening.sh - Automatisierte Systemhärtung" \
             --checklist \
             "Zu härtende Bereiche auswählen:\n\n(CIS Level 1 = Grundhärtung, Level 2 = Erweiterte Härtung)\nMit LEERTASTE auswählen, mit TAB zum Bestätigen wechseln." \
-            40 110 24 \
+            55 140 30 \
             "${menu_items[@]}" \
             3>&1 1>&2 2>&3)
 
@@ -1836,9 +1830,6 @@ show_tui() {
                 ;;
             "L1L2")
                 has_l1l2=true
-                ;;
-            "_sep")
-                # Trennlinie ignorieren
                 ;;
             *)
                 selected_categories+=("${item}")
